@@ -29,5 +29,28 @@ jobs:
       - name: Build application
         run: ./mvnw clean package -DskipTests
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::844096318659:role/GitHubActionsPaymentGatewayECRRole
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Build Docker image
-        run: docker build -t payment-gateway:${{ github.sha }} .
+        env:
+          REGISTRY: 844096318659.dkr.ecr.us-east-1.amazonaws.com
+          REPOSITORY: payment-gateway
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
+
+      - name: Push Docker image
+        env:
+          REGISTRY: 844096318659.dkr.ecr.us-east-1.amazonaws.com
+          REPOSITORY: payment-gateway
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
