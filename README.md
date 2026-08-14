@@ -1,119 +1,123 @@
 Payment Gateway
 
-A production-oriented payment gateway backend built with Java and Spring Boot, focusing on reliable payment processing, transactional consistency, idempotency, REST API design, containerization, and CI/CD automation.
+A backend payment-processing service built with Java 17 and Spring Boot, designed to demonstrate production-oriented backend engineering practices around idempotency, transaction management, concurrency, REST APIs, Docker, AWS, and CI/CD.
 
-The project is designed to demonstrate practical backend engineering concepts used in payment and financial systems.
+The project is intentionally being evolved from a working payment service toward a production-style distributed system.
 
-Technology Stack
-
-<p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/java/java-original.svg" width="42" height="42" alt="Java" title="Java"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/spring/spring-original.svg" width="42" height="42" alt="Spring Boot" title="Spring Boot"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mysql/mysql-original.svg" width="42" height="42" alt="MySQL" title="MySQL"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" width="42" height="42" alt="Docker" title="Docker"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/maven/maven-original.svg" width="42" height="42" alt="Maven" title="Maven"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" width="42" height="42" alt="GitHub Actions" title="GitHub Actions"/>
-  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/amazonwebservices/amazonwebservices-original-wordmark.svg" width="55" height="42" alt="AWS" title="AWS"/>
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-17-ED8B00?style=flat-square&logo=openjdk&logoColor=white" alt="Java 17"/>
+  <img src="https://img.shields.io/badge/Spring%20Boot-3.x-6DB33F?style=flat-square&logo=springboot&logoColor=white" alt="Spring Boot"/>
+  <img src="https://img.shields.io/badge/MySQL-8-4479A1?style=flat-square&logo=mysql&logoColor=white" alt="MySQL"/>
+  <img src="https://img.shields.io/badge/Docker-Containerized-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker"/>
+  <img src="https://img.shields.io/badge/AWS-ECR%20%7C%20IAM%20%7C%20STS-232F3E?style=flat-square&logo=amazonaws&logoColor=white" alt="AWS"/>
+  <img src="https://img.shields.io/badge/GitHub%20Actions-CI%2FCD-2088FF?style=flat-square&logo=githubactions&logoColor=white" alt="GitHub Actions"/>
 </p>
 
-Backend: Java 17, Spring Boot, Spring Web, Spring Data JPA, Hibernate, Jakarta Persistence
+What this project demonstrates
 
-Database: MySQL 8
+This is not just a CRUD application. The implementation focuses on problems that matter in payment systems:
 
-Build: Maven
+Idempotent payment creation
 
-Containerization: Docker
+Duplicate-request protection
 
-Cloud: AWS, Amazon ECR, AWS IAM, AWS STS
+Transactional state changes
 
-CI/CD: GitHub Actions, GitHub OIDC
+Database-level uniqueness guarantees
 
-Overview
+Order-state validation
 
-The Payment Gateway provides APIs for creating orders, initiating payments, and retrieving payment information.
+Domain-specific exception handling
 
-The system is designed around the principle that payment operations must be:
+SHA-256 request hashing
 
-Reliable
+Dockerized application delivery
 
-Idempotent
+GitHub Actions CI/CD
 
-Transactionally consistent
+GitHub OIDC authentication with AWS
 
-Safe against duplicate requests
+Least-privilege ECR access
 
-Maintainable
-
-Deployable through an automated CI/CD pipeline
-
-The current implementation focuses on the core payment-processing domain while establishing a foundation that can be extended toward a distributed production architecture.
+Immutable Docker image tagging using Git commit SHA
 
 Architecture
 
-                    Client
+                         Client
+                           |
+                           | HTTP
+                           v
+                +----------------------+
+                |  Payment Controller  |
+                +----------+-----------+
+                           |
+                           v
+                +----------------------+
+                |   Payment Service    |
+                +----------+-----------+
+                           |
+             +-------------+-------------+
+             |             |             |
+             v             v             v
+        Order Repo    Payment Repo   Idempotency
+             |             |          Repository
+             +-------------+-------------+
+                           |
+                           v
+                        MySQL
+
+Payment creation flow
+
+POST /api/v1/payments
+        |
+        v
+Validate Idempotency-Key
+        |
+        v
+Generate request hash
+        |
+        v
+Check idempotency record
+        |
+        +-----------------------------+
+        |                             |
+        | Existing key                | New key
+        v                             v
+ Validate request hash       Create PROCESSING record
+        |                             |
+        |                             v
+        |                      Validate order
+        |                             |
+        |                             v
+        |                       Create payment
+        |                             |
+        |                             v
+        |                     Update order state
+        |                             |
+        |                             v
+        |                       Save payment
+        |                             |
+        |                             v
+        |                    Mark COMPLETED
+        |                             |
+        +-------------+---------------+
                       |
                       v
-              REST API / Controller
-                      |
-                      v
-                Service Layer
-                      |
-          +-----------+-----------+
-          |                       |
-          v                       v
-    Order Repository       Payment Repository
-          |                       |
-          +-----------+-----------+
-                      |
-                      v
-                   MySQL
-                      |
-                      |
-              Idempotency Records
+                Payment response
 
-The application is packaged as a Docker container and the CI/CD pipeline builds and publishes the container image to Amazon ECR.
+Core domain
 
-Developer
-   |
-   | git push
-   v
-GitHub Repository
-   |
-   v
-GitHub Actions
-   |
-   +---- Run Tests
-   |
-   +---- Build Application
-   |
-   +---- Build Docker Image
-   |
-   +---- Authenticate using AWS OIDC
-   |
-   +---- Push Image
-   |
-   v
-Amazon ECR
+Order
 
-Core Features
+Order
+├── orderId
+├── quantity
+├── amount
+├── currency
+├── orderStatus
+└── payments
 
-Order Management
-
-The system supports creation and management of orders.
-
-An order contains:
-
-Order ID
-
-Quantity
-
-Amount
-
-Currency
-
-Order status
-
-Supported order states include:
+Order lifecycle:
 
 CREATED
    |
@@ -123,113 +127,139 @@ PAYMENT_PENDING
    v
 PAID
 
-An order can also transition to:
+or
 
+CREATED / PAYMENT_PENDING
+   |
+   v
 CANCELLED
 
-The domain model prevents payment processing when an order is not in a valid state.
+Payment processing is allowed only when the order is in an acceptable state.
 
-Payment Processing
+Payment
 
-The payment API accepts an order ID and payment type.
+Payment
+├── paymentId
+├── order
+├── paymentType
+├── paymentStatus
+├── paymentAmount
+└── currency
 
-Supported payment types currently include:
+Supported payment types:
 
 UPI
 CARD
 NET_BANKING
 
-A payment is initially created with:
+Idempotency record
 
-INITIATED
-
-The payment is associated with the corresponding order.
+IdempotencyRecord
+├── id
+├── idempotencyKey      UNIQUE
+├── requestHash
+├── paymentId
+├── status
+└── createdAt
 
 Idempotency
 
-Payment APIs must handle duplicate requests safely.
+Payment APIs cannot assume that one HTTP request equals one payment attempt.
+
+A client may retry because of:
+
+Network failures
+
+Request timeouts
+
+Client retries
+
+Load balancer retries
+
+Temporary service failures
+
+The API therefore accepts an idempotency key:
+
+POST /api/v1/payments
+Idempotency-Key: payment-request-001
+
+For the same key and same request:
+
+First request
+    |
+    v
+Create payment
+    |
+    v
+Store result
+
+Retry
+    |
+    v
+Find existing key
+    |
+    v
+Return existing payment
+
+This prevents accidental duplicate payment creation.
+
+Request reuse protection
+
+The request is hashed using SHA-256.
+
+Idempotency-Key
+       +
+Request data
+       |
+       v
+Request Hash
+
+If the same idempotency key is later used with different request data, the request is rejected instead of silently being treated as the original operation.
+
+Transaction management
+
+Payment creation changes multiple pieces of state:
+
+Idempotency Record
+        |
+        +--> PROCESSING
+        |
+        +--> COMPLETED
+
+Order
+        |
+        +--> PAYMENT_PENDING
+
+Payment
+        |
+        +--> INITIATED
+
+These changes are performed inside a Spring transaction so a failure does not leave the database in a partially updated state.
+
+The current implementation uses @Transactional at the service boundary.
+
+Concurrency protection
+
+Application-level checks alone are not sufficient for concurrent requests.
 
 For example:
 
-POST /api/v1/payments
-Idempotency-Key: payment-request-123
+Request A                  Request B
+    |                          |
+    | Check key                | Check key
+    | -> Not found             | -> Not found
+    |                          |
+    +----------+---------------+
+               |
+          Both attempt insert
 
-If a client retries the same request with the same idempotency key, the system returns the previously created payment instead of creating a duplicate payment.
+The database provides the final uniqueness guarantee:
 
-Idempotency Flow
-
-Request
-   |
-   v
-Extract Idempotency-Key
-   |
-   v
-Generate Request Hash
-   |
-   v
-Check Idempotency Record
-   |
-   +-----------------------------+
-   |                             |
-Existing                       New
-   |                             |
-   v                             v
-Validate Hash             Create PROCESSING record
-   |                             |
-   +-------------+---------------+
-                 |
-                 v
-          Process Payment
-                 |
-                 v
-          Save Payment
-                 |
-                 v
-       Mark operation COMPLETED
-                 |
-                 v
-          Return Payment
-
-Key Reuse Protection
-
-An idempotency key cannot safely be reused for a different request.
-
-The implementation generates a SHA-256 hash from relevant request attributes.
-
-If an existing idempotency key is used with different request data, the request is rejected.
-
-Transaction Management
-
-Payment creation is executed within a database transaction.
-
-The operation involves multiple state changes:
-
-1. Create idempotency record
-2. Retrieve order
-3. Validate order state
-4. Create payment
-5. Update order state
-6. Persist payment
-7. Mark idempotency operation as completed
-
-These operations are handled as a transactional unit using Spring's transaction management.
-
-Concurrency Handling
-
-The idempotency_key column has a database-level unique constraint.
-
-idempotency_records
--------------------------
-id
 idempotency_key UNIQUE
-request_hash
-payment_id
-status
-created_at
 
-If concurrent requests attempt to claim the same idempotency key, the database constraint prevents both requests from successfully creating the record.
+If another request has already claimed the key, the insert fails with a database constraint violation and the application handles the resulting DataIntegrityViolationException.
 
-The application handles the resulting DataIntegrityViolationException.
+This is intentionally implemented using a database constraint rather than adding locking mechanisms without a demonstrated business requirement.
 
 REST API
 
@@ -238,7 +268,7 @@ Create Order
 POST /api/v1/orders
 Content-Type: application/json
 
-Example request:
+Request:
 
 {
   "quantity": 2,
@@ -246,7 +276,7 @@ Example request:
   "currency": "INR"
 }
 
-Example response:
+Response:
 
 {
   "orderId": 1,
@@ -262,14 +292,14 @@ POST /api/v1/payments
 Content-Type: application/json
 Idempotency-Key: payment-request-001
 
-Example request:
+Request:
 
 {
   "orderId": 1,
   "paymentType": "UPI"
 }
 
-Example response:
+Response:
 
 {
   "paymentId": 1,
@@ -288,88 +318,93 @@ Example:
 
 GET /api/v1/payments/1
 
-Domain Model
+Technology
 
-Order
+Area
 
-Order
---------------------------------
-orderId
-quantity
-amount
-currency
-orderStatus
-payments
+Technology
 
-Payment
+Language
 
-Payment
---------------------------------
-paymentId
-order
-paymentType
-paymentStatus
-paymentAmount
-currency
+Java 17
 
-Idempotency Record
+Framework
 
-IdempotencyRecord
---------------------------------
-id
-idempotencyKey
-requestHash
-paymentId
-status
-createdAt
+Spring Boot
 
-Project Structure
+Web
 
-src
-├── main
-│   ├── java
-│   │   └── com.pk.payment
-│   │       ├── controller
-│   │       ├── dto
-│   │       ├── entity
-│   │       ├── enums
-│   │       ├── exception
-│   │       ├── mapper
-│   │       ├── repository
-│   │       └── service
-│   │           └── impl
-│   │
-│   └── resources
-│       └── application.yml
+Spring Web / REST
+
+Persistence
+
+Spring Data JPA
+
+ORM
+
+Hibernate
+
+Database
+
+MySQL 8
+
+Build
+
+Maven
+
+Containerization
+
+Docker
+
+CI/CD
+
+GitHub Actions
+
+Cloud
+
+AWS
+
+Container Registry
+
+Amazon ECR
+
+Authentication
+
+GitHub OIDC + AWS STS
+
+Project structure
+
+payment-gateway/
 │
-├── test
-│   └── java
-│       └── com.pk.payment
+├── .github/
+│   └── workflows/
+│       └── payment-gateway-ci.yml
+│
+├── src/
+│   ├── main/
+│   │   ├── java/com/pk/payment/
+│   │   │   ├── controller/
+│   │   │   ├── dto/
+│   │   │   ├── entity/
+│   │   │   ├── enums/
+│   │   │   ├── exception/
+│   │   │   ├── mapper/
+│   │   │   ├── repository/
+│   │   │   └── service/
+│   │   │       └── impl/
+│   │   │
+│   │   └── resources/
+│   │       └── application.yml
+│   │
+│   └── test/
+│       └── java/com/pk/payment/
 │
 ├── Dockerfile
 ├── pom.xml
-└── .github
-    └── workflows
-        └── payment-gateway-ci.yml
+├── mvnw
+└── README.md
 
-Configuration
-
-Database credentials are supplied through environment variables rather than being committed to source control.
-
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/payment_db
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-
-Example environment variables:
-
-DB_USERNAME=<database-username>
-DB_PASSWORD=<database-password>
-
-Sensitive credentials should never be committed to GitHub.
-
-Running Locally
+Local development
 
 Prerequisites
 
@@ -377,20 +412,25 @@ Java 17
 
 MySQL 8
 
+Maven Wrapper
+
 Docker (optional)
 
-Create Database
+Create the database
 
 CREATE DATABASE payment_db;
 
-Configure the required environment variables.
+Configure the application using environment variables:
 
-Windows PowerShell:
+DB_USERNAME=<database-username>
+DB_PASSWORD=<database-password>
+
+Windows PowerShell
 
 $env:DB_USERNAME="your_username"
 $env:DB_PASSWORD="your_password"
 
-Run Application
+Run
 
 Linux/macOS:
 
@@ -400,96 +440,92 @@ Windows:
 
 mvnw.cmd spring-boot:run
 
-The application runs on:
+Application:
 
 http://localhost:8080
 
 Docker
 
-Build the image:
+Build:
 
 docker build -t payment-gateway .
 
-Run the container:
+Run:
 
 docker run -p 8080:8080 \
   -e DB_USERNAME=your_username \
   -e DB_PASSWORD=your_password \
   payment-gateway
 
-The MySQL instance must be accessible from the container.
+The container must be able to reach the MySQL instance configured by the application.
 
-CI/CD Pipeline
+CI/CD
 
-The project uses GitHub Actions to automate the build and container publishing workflow.
+The project uses GitHub Actions to validate and package every push to main.
 
-Git Push
-   |
-   v
-Checkout Repository
-   |
-   v
-Setup Java 17
-   |
-   v
-Run Maven Tests
-   |
-   v
-Build Application
-   |
-   v
-Authenticate with AWS
-   |
-   | GitHub OIDC
-   v
-AWS IAM Role
-   |
-   v
-Amazon ECR Authentication
-   |
-   v
-Build Docker Image
-   |
-   v
-Push Docker Image to ECR
+                 Git Push
+                    |
+                    v
+             GitHub Actions
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+      Maven Tests        Maven Package
+          |                   |
+          +---------+---------+
+                    |
+                    v
+              Docker Build
+                    |
+                    v
+             GitHub OIDC
+                    |
+                    v
+                AWS STS
+                    |
+                    v
+              IAM Role
+                    |
+                    v
+             Amazon ECR
+                    |
+                    v
+              Docker Image
 
-The workflow:
+The pipeline performs:
 
-Checks out the source code.
+Checkout source code
 
-Configures Java 17.
+Configure Java 17
 
-Runs the test suite.
+Run Maven tests
 
-Builds the Spring Boot application.
+Package the Spring Boot application
 
-Authenticates with AWS using GitHub OIDC.
+Authenticate to AWS using GitHub OIDC
 
-Logs into Amazon ECR.
+Authenticate Docker with Amazon ECR
 
-Builds the Docker image.
+Build the Docker image
 
-Pushes the image to ECR.
+Push the image to ECR
 
-Docker images are tagged using the Git commit SHA:
+Images are tagged using the Git commit SHA:
 
-payment-gateway:<commit-sha>
+payment-gateway:<git-commit-sha>
 
-This provides immutable image identification and allows an image to be traced back to the exact source revision that produced it.
+This makes every image traceable to the source revision that produced it.
 
-AWS Integration
+AWS authentication
 
-The project currently uses Amazon ECR as the container image registry.
+The CI pipeline does not use long-lived AWS access keys.
 
-<aws-account-id>.dkr.ecr.<region>.amazonaws.com/payment-gateway
-
-GitHub OIDC Authentication
-
-The CI/CD workflow uses short-lived AWS credentials through GitHub's OpenID Connect integration.
+Instead:
 
 GitHub Actions
       |
-      | OIDC Token
+      | OIDC token
       v
 AWS STS
       |
@@ -500,37 +536,37 @@ IAM Role
       v
 Amazon ECR
 
-The IAM trust policy restricts the role to the project's GitHub repository and main branch.
+The IAM trust policy restricts which GitHub repository and branch can assume the role.
 
-The IAM role is granted only the ECR permissions required by the pipeline.
+The role is granted only the ECR permissions required by the pipeline.
 
-No long-lived AWS access keys are stored in GitHub.
+This keeps AWS credentials out of GitHub repository secrets and uses short-lived credentials for the workflow.
 
-Security and Reliability
+Security considerations
 
-The project currently implements:
+Current implementation includes:
 
 Environment-based database credentials
 
+No database passwords committed to source control
+
 GitHub OIDC authentication
 
-Restricted AWS IAM permissions
+Restricted IAM trust policy
 
-Idempotent payment creation
+ECR permissions scoped to the payment-gateway repository
 
-SHA-256 request hashing
+Idempotency-key uniqueness at the database level
 
-Database-level unique constraints
+Request-hash validation
 
 Transactional payment processing
 
-Domain-specific exception handling
+Domain-specific exceptions
 
-Dockerized application delivery
+Error handling
 
-Error Handling
-
-The application uses domain-specific exceptions for common failure scenarios:
+The service uses domain-specific exceptions including:
 
 OrderNotFoundException
 PaymentNotFoundException
@@ -538,76 +574,67 @@ InvalidOrderStateException
 IdempotencyKeyReuseException
 PaymentProcessingException
 
-This separates business failures from infrastructure-level exceptions and allows the REST layer to provide appropriate HTTP responses.
+This keeps business failures explicit and separates domain behavior from infrastructure exceptions.
 
-Design Decisions
+Engineering decisions
 
-Why Idempotency?
+Why idempotency?
 
-Payment requests can be retried because of:
+A payment endpoint must tolerate retries without creating duplicate payments.
 
-Network failures
+Why SHA-256?
 
-Client retries
+The request hash allows the service to detect an idempotency key being reused for a different request.
 
-Timeout responses
+Why a database unique constraint?
 
-Load balancer retries
+Concurrent requests can pass an application-level existence check at the same time. The database constraint provides the final uniqueness guarantee.
 
-Mobile application retries
+Why transactions?
 
-A payment API should not assume that every incoming request represents a new payment operation.
+Payment creation modifies multiple related records. Transaction boundaries prevent partial state updates.
 
-Why a Database Constraint?
+Why not add locking immediately?
 
-Application-level checks alone are not sufficient under concurrency.
+Locking should solve a demonstrated concurrency problem. The current idempotency design already uses a database uniqueness constraint for duplicate-key protection, so additional locking is not introduced without a requirement.
 
-Two requests could both observe that an idempotency key does not exist before either request inserts it.
+Roadmap
 
-The unique database constraint provides the final consistency boundary:
+The current implementation provides the foundation for the following production-oriented extensions.
 
-idempotency_key UNIQUE
+Current
+  |
+  +--> Payment Provider abstraction
+  |
+  +--> Payment state machine
+  |
+  +--> Transactional Outbox
+  |
+  +--> Kafka event publishing
+  |
+  +--> Redis
+  |
+  +--> Observability
+  |
+  +--> Testcontainers
+  |
+  +--> Terraform
+  |
+  +--> AWS ECS / Fargate
 
-Why Transactions?
+Planned improvements
 
-Creating a payment changes multiple pieces of state.
-
-Order
-   |
-   +--> PAYMENT_PENDING
-
-Payment
-   |
-   +--> INITIATED
-
-Idempotency Record
-   |
-   +--> COMPLETED
-
-These changes should not leave the system in an inconsistent state if an operation fails midway.
-
-Future Engineering Roadmap
-
-The project is intentionally structured so production concerns can be introduced incrementally.
-
-Payment Provider Abstraction
-
-Introduce a provider abstraction:
+Payment provider abstraction
 
 PaymentService
       |
       v
 PaymentProvider
-      |
-      +---- UPI Provider
-      |
-      +---- Card Provider
-      |
-      +---- Net Banking Provider
+   +-- UPI
+   +-- Card
+   +-- Net Banking
 
-Payment State Machine
-
-Introduce stricter payment state transitions:
+Stronger payment state machine
 
 INITIATED
     |
@@ -619,47 +646,16 @@ SUCCESS  FAILED
 
 Transactional Outbox
 
-Introduce the transactional outbox pattern for reliable event publishing.
-
 Payment Transaction
-       |
-       +---- Payment
-       |
-       +---- Outbox Event
+        |
+        +--> Payment
+        |
+        +--> Outbox Event
                     |
                     v
                   Kafka
 
-Event-Driven Architecture
-
-Introduce asynchronous payment events:
-
-Payment Service
-      |
-      v
-     Kafka
-      |
-      +---- Notification Service
-      |
-      +---- Order Service
-      |
-      +---- Audit Service
-
-Redis
-
-Potential use cases:
-
-Short-lived idempotency lookups
-
-Distributed caching
-
-Rate limiting
-
-The database remains the authoritative source for payment state.
-
 Observability
-
-Introduce:
 
 Structured logging
 
@@ -671,124 +667,79 @@ Distributed tracing
 
 Health checks
 
-Integration Testing
+Testing
 
-Introduce Testcontainers for realistic MySQL integration testing.
+Introduce Testcontainers for integration tests against a real MySQL container.
 
 Infrastructure as Code
 
-Move AWS infrastructure management to Terraform:
+Move manually created AWS infrastructure to Terraform:
 
 Terraform
    |
-   +---- ECR
-   |
-   +---- IAM
-   |
-   +---- VPC
-   |
-   +---- RDS
-   |
-   +---- ECS / Fargate
+   +--> IAM
+   +--> ECR
+   +--> VPC
+   +--> RDS
+   +--> ECS / Fargate
 
 Deployment
 
-Extend the current pipeline:
+Extend the pipeline from:
 
 GitHub
-   |
-   v
+  |
+  v
 GitHub Actions
-   |
-   v
+  |
+  v
 Amazon ECR
-   |
-   v
-AWS ECS / Fargate
-   |
-   v
+
+to:
+
+GitHub
+  |
+  v
+GitHub Actions
+  |
+  v
+Amazon ECR
+  |
+  v
+ECS / Fargate
+  |
+  v
 Payment Gateway
 
-Engineering Concepts Demonstrated
+What I am building with this project
 
-Java 17
+The goal is to evolve the service incrementally from a clean Spring Boot backend into a production-style payment system.
 
-Spring Boot
-
-REST API design
-
-Layered architecture
-
-Domain modeling
-
-Spring Data JPA
-
-Hibernate
-
-Transaction management
-
-Database constraints
-
-Idempotency
-
-Concurrent request handling
-
-SHA-256 request hashing
-
-Exception handling
-
-Docker
-
-CI/CD
-
-GitHub Actions
-
-AWS IAM
-
-AWS STS
-
-GitHub OIDC
-
-Amazon ECR
-
-Secure credential management
-
-Development Approach
-
-The project is being developed incrementally, introducing production concepts based on actual system requirements rather than adding infrastructure prematurely.
-
-REST API
-   |
-   v
-Domain Model
-   |
-   v
+REST APIs
+    ↓
+Domain Modeling
+    ↓
 Transactions
-   |
-   v
+    ↓
 Idempotency
-   |
-   v
+    ↓
 Concurrency
-   |
-   v
-Containerization
-   |
-   v
+    ↓
+Docker
+    ↓
 CI/CD
-   |
-   v
+    ↓
 AWS
-   |
-   v
+    ↓
 Event-Driven Architecture
-   |
-   v
+    ↓
 Production Deployment
+
+The focus is on understanding why each engineering decision is required, rather than adding technologies only for the sake of the stack.
 
 Repository
 
-GitHub: https://github.com/mathalapavankalyan/payment-gateway
+GitHub Repository
 
 Author
 
@@ -796,13 +747,4 @@ Pavan Kalyan Mathala
 
 Backend / Software Engineer
 
-Primary focus:
-
-Java
-Spring Boot
-Microservices
-REST APIs
-AWS
-Docker
-Distributed Systems
-Generative AI
+Focus: Java | Spring Boot | Microservices | REST APIs | AWS | Docker | Distributed Systems | Generative AI
