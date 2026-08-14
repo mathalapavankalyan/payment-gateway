@@ -101,18 +101,41 @@ AWS container deployment
 
 3. Architecture
 
-flowchart LR
-    Client["Client"] --> Gateway["API Gateway"]
-    Gateway --> Payment["Payment Service"]
+Layer
 
-    Payment --> MySQL[("MySQL")]
-    Payment --> Redis[("Redis")]
-    Payment --> Outbox["Transactional Outbox"]
+Responsibility
 
-    Outbox --> Kafka["Kafka"]
+Client
 
-    Kafka --> Notification["Notification Service"]
-    Kafka --> Audit["Audit / Analytics"]
+Sends payment and order requests
+
+API Gateway
+
+Entry point for routing and cross-cutting concerns
+
+Payment Service
+
+Owns payment and order business logic
+
+MySQL
+
+Source of truth for transactional state
+
+Redis
+
+Low-latency shared state where required
+
+Transactional Outbox
+
+Reliably records events with database changes
+
+Kafka
+
+Distributes asynchronous domain events
+
+Consumers
+
+Handle notifications, audit, analytics, and other downstream work
 
 The core payment service remains responsible for payment-domain consistency, while asynchronous operations are moved toward event-driven processing where eventual consistency is acceptable.
 
@@ -120,33 +143,59 @@ The core payment service remains responsible for payment-domain consistency, whi
 
 The payment creation flow is designed to make payment requests safe to retry while maintaining consistent order and payment state.
 
-flowchart TD
-    A["POST /api/v1/payments"] --> B["Validate Request"]
-    B --> C["Read Idempotency-Key"]
-    C --> D["Generate Request Hash"]
-    D --> E{"Idempotency Key Exists?"}
+Request Processing
 
-    E -->|Yes| F["Compare Request Hash"]
-    E -->|No| G["Create Idempotency Record<br/>PROCESSING"]
+Step
 
-    F --> H{"Hash Matches?"}
-    H -->|No| I["Reject Request<br/>IdempotencyKeyReuseException"]
-    H -->|Yes| J{"Current Status"}
+Operation
 
-    J -->|COMPLETED| K["Return Existing Payment"]
-    J -->|PROCESSING| L["Reject Duplicate Request"]
+1
 
-    G --> M["Load Order"]
-    M --> N{"Order Can Accept Payment?"}
+Receive POST /api/v1/payments
 
-    N -->|No| O["Reject Request<br/>InvalidOrderStateException"]
-    N -->|Yes| P["Create Payment"]
+2
 
-    P --> Q["Set Payment Status<br/>INITIATED"]
-    Q --> R["Move Order to<br/>PAYMENT_PENDING"]
-    R --> S["Persist Payment"]
-    S --> T["Mark Idempotency Record<br/>COMPLETED"]
-    T --> U["Return Payment Response"]
+Validate the request
+
+3
+
+Read the Idempotency-Key
+
+4
+
+Generate the request hash
+
+5
+
+Check the existing idempotency record
+
+6
+
+Claim a new key as PROCESSING
+
+7
+
+Load and validate the order
+
+8
+
+Create the payment
+
+9
+
+Update the order to PAYMENT_PENDING
+
+10
+
+Persist the payment
+
+11
+
+Mark the idempotency operation as COMPLETED
+
+12
+
+Return the payment response
 
 Flow Summary
 
@@ -183,23 +232,61 @@ Idempotency-Key: payment-request-001
 
 Same request + same key
 
-sequenceDiagram
-    participant C as Client
-    participant P as Payment Service
-    participant DB as MySQL
+First Request
 
-    C->>P: Payment + Key A
-    P->>DB: Check Key A
-    DB-->>P: Not Found
-    P->>DB: Create Key A
-    P->>DB: Create Payment
-    P->>DB: Mark Key A COMPLETED
-    P-->>C: Payment #1
+Component
 
-    C->>P: Same Payment + Key A
-    P->>DB: Check Key A
-    DB-->>P: Key A / Payment #1
-    P-->>C: Payment #1
+Action
+
+Client
+
+Sends payment request with Key A
+
+Payment Service
+
+Checks Key A
+
+MySQL
+
+No record exists
+
+Payment Service
+
+Creates the idempotency record
+
+Payment Service
+
+Creates the payment
+
+MySQL
+
+Stores payment and marks idempotency as COMPLETED
+
+Client
+
+Receives Payment #1
+
+Retry
+
+Component
+
+Action
+
+Client
+
+Sends the same request with Key A
+
+Payment Service
+
+Finds Key A
+
+MySQL
+
+Returns the existing payment reference
+
+Client
+
+Receives Payment #1 again
 
 The retry returns the previously created payment instead of creating another payment.
 
@@ -230,19 +317,37 @@ The database therefore enforces:
 
 idempotency_key UNIQUE
 
-sequenceDiagram
-    participant A as Request A
-    participant B as Request B
-    participant DB as MySQL
+Concurrent Requests
 
-    A->>DB: INSERT idempotency key
-    B->>DB: INSERT same key
+Request
 
-    DB-->>A: Insert succeeds
-    DB-->>B: Unique constraint violation
+Database operation
 
-    A->>DB: Process payment
-    B-->>B: Treat as duplicate request
+Result
+
+Request A
+
+Insert idempotency key
+
+Succeeds
+
+Request B
+
+Insert the same key
+
+Rejected by unique constraint
+
+Request A
+
+Process payment
+
+Continues
+
+Request B
+
+Handle duplicate
+
+Returns processing/conflict response
 
 The database constraint is the final correctness boundary.
 
@@ -252,17 +357,25 @@ Locking is introduced only when a concrete business requirement demonstrates tha
 
 Payment creation modifies multiple related pieces of state:
 
-flowchart LR
-    T["Transaction"] --> I["Idempotency Record"]
-    T --> O["Order"]
-    T --> P["Payment"]
+Transaction Scope
 
-    I --> I1["PROCESSING"]
-    I1 --> I2["COMPLETED"]
+A payment transaction coordinates these state changes:
 
-    O --> O1["PAYMENT_PENDING"]
+Component
 
-    P --> P1["INITIATED"]
+State change
+
+Idempotency Record
+
+PROCESSING → COMPLETED
+
+Order
+
+CREATED → PAYMENT_PENDING
+
+Payment
+
+Created with INITIATED status
 
 The business operation is coordinated using a Spring transaction at the service layer.
 
@@ -331,22 +444,18 @@ IdempotencyRecord
 
 The core payment service should not be tightly coupled to a specific external payment provider.
 
-classDiagram
-    class PaymentService
-    class PaymentProvider {
-        <<interface>>
-        +processPayment()
-        +getPaymentStatus()
-    }
+Provider Boundary
 
-    class UpiProvider
-    class CardProvider
-    class NetBankingProvider
+PaymentService
+      |
+      v
+PaymentProvider
+      |
+      +-- UPI Provider
+      +-- Card Provider
+      +-- Net Banking Provider
 
-    PaymentService --> PaymentProvider
-    PaymentProvider <|.. UpiProvider
-    PaymentProvider <|.. CardProvider
-    PaymentProvider <|.. NetBankingProvider
+The provider interface keeps vendor-specific integration details outside the core payment domain.
 
 Provider-specific concerns such as request mapping, response mapping, timeouts, retries, and provider errors remain at the integration boundary.
 
@@ -356,15 +465,35 @@ Asynchronous operations should not compromise the consistency of the payment tra
 
 The target event flow is:
 
-flowchart LR
-    Payment["Payment Transaction"] --> DB[("MySQL")]
-    Payment --> Outbox["Outbox Event"]
-    Outbox --> Publisher["Event Publisher"]
-    Publisher --> Kafka["Kafka"]
+Event Pipeline
 
-    Kafka --> Notification["Notification"]
-    Kafka --> Audit["Audit / Analytics"]
-    Kafka --> Other["Other Consumers"]
+Stage
+
+Responsibility
+
+Payment Transaction
+
+Changes the business state
+
+MySQL
+
+Persists the transaction
+
+Outbox
+
+Stores the event in the same transaction
+
+Event Publisher
+
+Publishes pending events
+
+Kafka
+
+Distributes events
+
+Consumers
+
+Process notifications, audit, analytics, and other downstream tasks
 
 The Transactional Outbox pattern addresses the dual-write problem.
 
@@ -596,12 +725,13 @@ Payment-processing metrics
 
 Request tracing follows the operation across components:
 
-flowchart LR
-    Request["Incoming Request"] --> API["API"]
-    API --> Service["Payment Service"]
-    Service --> DB[("Database")]
-    Service --> Provider["Payment Provider"]
-    Service --> Events["Event Pipeline"]
+Request Observability
+
+Every request can be traced through:
+
+Request → API → Payment Service → Database / Payment Provider / Event Pipeline
+
+A correlation ID ties related application logs together.
 
 17. Security
 
@@ -631,11 +761,9 @@ Authentication and authorization at the API boundary
 
 The application is packaged as a Docker image.
 
-flowchart LR
-    Source["Source Code"] --> Maven["Maven Build"]
-    Maven --> Jar["Spring Boot JAR"]
-    Jar --> Docker["Docker Image"]
-    Docker --> ECR["Amazon ECR"]
+Container Delivery
+
+Source Code → Maven Build → Spring Boot JAR → Docker Image → Amazon ECR
 
 Build locally:
 
@@ -652,16 +780,47 @@ docker run -p 8080:8080 \
 
 GitHub Actions automates application validation and Docker image publishing.
 
-flowchart LR
-    Push["Git Push"] --> Checkout["Checkout"]
-    Checkout --> Java["Java 17"]
-    Java --> Test["Run Tests"]
-    Test --> Build["Build Application"]
-    Build --> Docker["Build Docker Image"]
-    Docker --> OIDC["GitHub OIDC"]
-    OIDC --> STS["AWS STS"]
-    STS --> IAM["IAM Role"]
-    IAM --> ECR["Amazon ECR"]
+CI/CD Pipeline
+
+Stage
+
+Action
+
+1
+
+Checkout source
+
+2
+
+Set up Java 17
+
+3
+
+Run Maven tests
+
+4
+
+Package the application
+
+5
+
+Authenticate to AWS through GitHub OIDC
+
+6
+
+Assume the restricted IAM role
+
+7
+
+Authenticate with Amazon ECR
+
+8
+
+Build the Docker image
+
+9
+
+Push the image using the Git commit SHA
 
 The pipeline performs:
 
@@ -691,17 +850,9 @@ This makes each published image traceable to an exact source revision.
 
 The CI/CD workflow uses GitHub's OIDC identity token to assume an AWS IAM role.
 
-sequenceDiagram
-    participant G as GitHub Actions
-    participant STS as AWS STS
-    participant IAM as IAM Role
-    participant ECR as Amazon ECR
+Authentication Flow
 
-    G->>STS: OIDC token
-    STS->>IAM: AssumeRoleWithWebIdentity
-    IAM-->>STS: Temporary credentials
-    STS-->>G: Temporary AWS credentials
-    G->>ECR: Authenticate and push image
+GitHub Actions → OIDC Token → AWS STS → Restricted IAM Role → Temporary Credentials → Amazon ECR
 
 No long-lived AWS access keys are required in GitHub repository secrets.
 
@@ -711,15 +862,39 @@ The IAM trust policy is restricted to the intended repository and branch.
 
 The target deployment architecture is:
 
-flowchart TB
-    GitHub["GitHub Repository"] --> Actions["GitHub Actions"]
-    Actions --> ECR["Amazon ECR"]
-    ECR --> ECS["ECS / Fargate"]
+Target AWS Components
 
-    ECS --> ALB["Application Load Balancer"]
-    ECS --> MySQL[("MySQL")]
-    ECS --> Redis[("Redis")]
-    ECS --> Kafka["Kafka / Event Platform"]
+Component
+
+Purpose
+
+GitHub Actions
+
+Build and delivery automation
+
+Amazon ECR
+
+Container image registry
+
+ECS / Fargate
+
+Container execution
+
+Application Load Balancer
+
+Application traffic distribution
+
+MySQL
+
+Persistent transactional data
+
+Redis
+
+Low-latency shared state
+
+Kafka / Event Platform
+
+Asynchronous event processing
 
 The application is containerized so the same image can be promoted across environments.
 
@@ -729,17 +904,43 @@ Terraform is used to make infrastructure reproducible and version controlled.
 
 Target infrastructure includes:
 
-flowchart TB
-    Terraform["Terraform"]
+Infrastructure Managed by Terraform
 
-    Terraform --> IAM["IAM"]
-    Terraform --> ECR["ECR"]
-    Terraform --> VPC["VPC"]
-    Terraform --> SG["Security Groups"]
-    Terraform --> DB["Database"]
-    Terraform --> ECS["ECS / Fargate"]
-    Terraform --> ALB["Load Balancer"]
-    Terraform --> Monitoring["Monitoring"]
+Resource
+
+Purpose
+
+IAM
+
+Access control
+
+ECR
+
+Container registry
+
+VPC
+
+Network isolation
+
+Security Groups
+
+Network access control
+
+Database
+
+Persistent storage
+
+ECS / Fargate
+
+Application runtime
+
+Load Balancer
+
+Traffic distribution
+
+Monitoring
+
+Operational visibility
 
 Application code and infrastructure code remain logically separated while both are maintained under version control.
 
@@ -761,36 +962,65 @@ The relational database remains authoritative for payment state.
 
 24. Project Structure
 
-payment-gateway/
-│
-├── .github/
-│   └── workflows/
-│       └── payment-gateway-ci.yml
-│
-├── src/
-│   ├── main/
-│   │   ├── java/com/pk/payment/
-│   │   │   ├── controller/
-│   │   │   ├── dto/
-│   │   │   ├── entity/
-│   │   │   ├── enums/
-│   │   │   ├── exception/
-│   │   │   ├── mapper/
-│   │   │   ├── repository/
-│   │   │   └── service/
-│   │   │       └── impl/
-│   │   │
-│   │   └── resources/
-│   │       └── application.yml
-│   │
-│   └── test/
-│       └── java/com/pk/payment/
-│
-├── Dockerfile
-├── pom.xml
-├── mvnw
-├── mvnw.cmd
-└── README.md
+Path
+
+Purpose
+
+.github/workflows/
+
+GitHub Actions CI/CD workflows
+
+src/main/java/com/pk/payment/controller/
+
+REST controllers
+
+src/main/java/com/pk/payment/dto/
+
+Request/response DTOs
+
+src/main/java/com/pk/payment/entity/
+
+JPA entities
+
+src/main/java/com/pk/payment/enums/
+
+Domain enums
+
+src/main/java/com/pk/payment/exception/
+
+Domain exceptions
+
+src/main/java/com/pk/payment/mapper/
+
+Entity/DTO mapping
+
+src/main/java/com/pk/payment/repository/
+
+Spring Data repositories
+
+src/main/java/com/pk/payment/service/
+
+Service contracts and implementations
+
+src/main/resources/
+
+Application configuration
+
+src/test/
+
+Unit and integration tests
+
+Dockerfile
+
+Container image definition
+
+pom.xml
+
+Maven build configuration
+
+README.md
+
+Project documentation
 
 25. Local Development
 
@@ -972,13 +1202,9 @@ Production monitoring
 
 The project follows a problem-driven engineering approach:
 
-flowchart LR
-    Requirement["Requirement"] --> Design["Design"]
-    Design --> Implementation["Implementation"]
-    Implementation --> Test["Test"]
-    Test --> Failure["Failure Analysis"]
-    Failure --> Harden["Production Hardening"]
-    Harden --> Requirement
+Engineering Loop
+
+Requirement → Design → Implementation → Test → Failure Analysis → Production Hardening
 
 Technologies are introduced because they solve specific engineering problems.
 
