@@ -4,9 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+
 permissions:
   id-token: write
   contents: read
@@ -39,21 +37,13 @@ jobs:
           aws-region: us-east-1
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker image
+      - name: Build and push Docker image
         env:
           REGISTRY: 844096318659.dkr.ecr.us-east-1.amazonaws.com
           REPOSITORY: payment-gateway
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
-
-      - name: Push Docker image
-        env:
-          REGISTRY: 844096318659.dkr.ecr.us-east-1.amazonaws.com
-          REPOSITORY: payment-gateway
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
